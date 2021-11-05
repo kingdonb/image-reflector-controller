@@ -46,6 +46,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
+	"github.com/Azure/azure-sdk-for-go/sdk/azidentity"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/ecr"
@@ -56,6 +59,7 @@ import (
 	"github.com/fluxcd/pkg/runtime/predicates"
 
 	imagev1 "github.com/fluxcd/image-reflector-controller/api/v1beta1"
+	"github.com/fluxcd/image-reflector-controller/internal/azure"
 )
 
 // These are intended to match the keys used in e.g.,
@@ -63,9 +67,10 @@ import (
 // for consistency (and perhaps this will have its own flux create
 // secret subcommand at some point).
 const (
-	ClientCert = "certFile"
-	ClientKey  = "keyFile"
-	CACert     = "caFile"
+	ClientCert               = "certFile"
+	ClientKey                = "keyFile"
+	CACert                   = "caFile"
+	azureCloudConfigJsonFile = "/etc/kubernetes/azure.json"
 )
 
 // ImageRepositoryReconciler reconciles a ImageRepository object
@@ -80,7 +85,9 @@ type ImageRepositoryReconciler struct {
 		DatabaseReader
 	}
 
-	AwsAutoLogin bool // automatically attempt to get credentials for images in ECR
+	AwsAutoLogin   bool // automatically attempt to get credentials for images in ECR
+	GcpAutoLogin   bool // automatically attempt to get credentials for images in GCP
+	AzureAutoLogin bool // automatically attempt to get credentials for images in ACR
 }
 
 type ImageRepositoryReconcilerOptions struct {
@@ -89,6 +96,19 @@ type ImageRepositoryReconcilerOptions struct {
 
 type dockerConfig struct {
 	Auths map[string]authn.AuthConfig
+}
+
+type gceToken struct {
+	AccessToken string `json:"access_token"`
+	ExpiresIn   int    `json:"expires_in"`
+	TokenType   string `json:"token_type"`
+}
+
+type azureCloudConfig struct {
+	AADClientId            string `json:"aadClientId"`
+	AADClientSecret        string `json:"aadClientSecret"`
+	TenantID               string `json:"tenantId"`
+	UserAssignedIdentityID string `json:"userAssignedIdentityID"`
 }
 
 // +kubebuilder:rbac:groups=image.toolkit.fluxcd.io,resources=imagerepositories,verbs=get;list;watch;create;update;patch;delete
@@ -246,6 +266,45 @@ func getAwsECRLoginAuth(accountId, awsEcrRegion string) (authn.AuthConfig, error
 	return authConfig, nil
 }
 
+// getGCRLoginAuth obtains authentication for the image by
+// getting a token from the metadata API on GCP. This assumes that
+// the pod has right to pull the image which would be the case if it
+// is hosted on GCP. It works with both service account and workload identity
+// enabled clusters.
+func getGCRLoginAuth() (authn.AuthConfig, error) {
+	var authConfig authn.AuthConfig
+	const gcpDefaultTokenURL = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
+
+	request, err := http.NewRequest(http.MethodGet, gcpDefaultTokenURL, nil)
+	if err != nil {
+		return authConfig, err
+	}
+
+	request.Header.Add("Metadata-Flavor", "Google")
+
+	client := &http.Client{}
+	response, err := client.Do(request)
+	if err != nil {
+		return authConfig, err
+	}
+
+	if response.StatusCode != http.StatusOK {
+		return authConfig, fmt.Errorf("unexpected status from metadata service: %s", response.Status)
+	}
+
+	var accessToken gceToken
+	decoder := json.NewDecoder(response.Body)
+	if err := decoder.Decode(&accessToken); err != nil {
+		return authConfig, err
+	}
+
+	authConfig = authn.AuthConfig{
+		Username: "oauth2accesstoken",
+		Password: accessToken.AccessToken,
+	}
+	return authConfig, nil
+}
+
 func (r *ImageRepositoryReconciler) scan(ctx context.Context, imageRepo *imagev1.ImageRepository, ref name.Reference) error {
 	timeout := imageRepo.GetTimeout()
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -296,6 +355,46 @@ func (r *ImageRepositoryReconciler) scan(ctx context.Context, imageRepo *imagev1
 			options = append(options, remote.WithAuth(auth))
 		} else {
 			ctrl.LoggerFrom(ctx).Info("No image credentials secret referenced, and ECR authentication is not enabled. To enable, set the controller flag --aws-autologin-for-ecr")
+		}
+	} else if hostIsGoogleContainerRegistry(ref.Context().RegistryStr()) {
+		if r.GcpAutoLogin {
+			logr.FromContext(ctx).Info("Logging in to GCP GCR for " + imageRepo.Spec.Image)
+			authConfig, err := getGCRLoginAuth()
+			if err != nil {
+				logr.FromContext(ctx).Info("error logging into GCP " + err.Error())
+				imagev1.SetImageRepositoryReadiness(
+					imageRepo,
+					metav1.ConditionFalse,
+					meta.ReconciliationFailedReason,
+					err.Error(),
+				)
+				return err
+			}
+
+			auth := authn.FromConfig(authConfig)
+			options = append(options, remote.WithAuth(auth))
+		} else {
+			logr.FromContext(ctx).Info("No image credentials secret referenced, and GCR authentication is not enabled. To enable, set the controller flag --gcp-autologin-for-gcr")
+		}
+	} else if hostIsAzureContainerRegistry(ref.Context().RegistryStr()) {
+		if r.AzureAutoLogin {
+			logr.FromContext(ctx).Info("Logging in to Azure ACR for " + imageRepo.Spec.Image)
+			authConfig, err := getAzureLoginAuth(ref)
+			if err != nil {
+				logr.FromContext(ctx).Info("error logging into ACR " + err.Error())
+				imagev1.SetImageRepositoryReadiness(
+					imageRepo,
+					metav1.ConditionFalse,
+					meta.ReconciliationFailedReason,
+					err.Error(),
+				)
+				return err
+			}
+
+			auth := authn.FromConfig(authConfig)
+			options = append(options, remote.WithAuth(auth))
+		} else {
+			logr.FromContext(ctx).Info("No image credentials secret referenced, and ACR authentication is not enabled. To enable, set the controller flag --azure-autologin-for-acr")
 		}
 	}
 
@@ -590,4 +689,47 @@ func getURLHost(urlStr string) (string, error) {
 	}
 
 	return u.Host, nil
+}
+
+// getAzureLoginAuth returns authentication for ACR. The details needed for authentication
+// are gotten from environment variable so there is not need to mount a host path.
+func getAzureLoginAuth(ref name.Reference) (authn.AuthConfig, error) {
+	var authConfig authn.AuthConfig
+
+	cred, err := azidentity.NewDefaultAzureCredential(nil)
+	if err != nil {
+		return authConfig, err
+	}
+	armToken, err := cred.GetToken(context.Background(), policy.TokenRequestOptions{
+		Scopes: []string{string(arm.AzurePublicCloud)},
+	})
+	if err != nil {
+		return authConfig, err
+	}
+
+	ex := azure.NewExchanger(ref.Context().RegistryStr())
+	accessToken, err := ex.ExchangeACRAccessToken(string(armToken.Token))
+	if err != nil {
+		return authConfig, fmt.Errorf("error exchanging token: %w", err)
+	}
+
+	return authn.AuthConfig{
+		// this is the acr username used by Azure
+		Username: "00000000-0000-0000-0000-000000000000",
+		Password: accessToken,
+	}, nil
+}
+
+// List from https://github.com/kubernetes/kubernetes/blob/master/pkg/credentialprovider/azure/azure_credentials.go
+func hostIsAzureContainerRegistry(host string) bool {
+	for _, v := range []string{".azurecr.io", ".azurecr.cn", ".azurecr.de", ".azurecr.us"} {
+		if strings.HasSuffix(host, v) {
+			return true
+		}
+	}
+	return false
+}
+
+func hostIsGoogleContainerRegistry(host string) bool {
+	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io")
 }

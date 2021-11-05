@@ -5,6 +5,8 @@ go 1.17
 replace github.com/fluxcd/image-reflector-controller/api => ./api
 
 require (
+	github.com/Azure/azure-sdk-for-go/sdk/azcore v0.20.0
+	github.com/Azure/azure-sdk-for-go/sdk/azidentity v0.12.0
 	github.com/Masterminds/semver/v3 v3.1.1
 	github.com/aws/aws-sdk-go v1.42.9
 	github.com/dgraph-io/badger/v3 v3.2103.2
@@ -21,6 +23,8 @@ require (
 	k8s.io/client-go v0.23.1
 	sigs.k8s.io/controller-runtime v0.11.0
 )
+
+require github.com/Azure/azure-sdk-for-go/sdk/internal v0.8.1 // indirect
 
 require (
 	cloud.google.com/go v0.97.0 // indirect
@@ -61,6 +65,7 @@ require (
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.2-0.20210730191737-8e42a01fb1b7 // indirect
+	github.com/pkg/browser v0.0.0-20210911075715-681adbf594b8 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.11.0 // indirect
 	github.com/prometheus/client_model v0.2.0 // indirect
@@ -72,6 +77,7 @@ require (
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.19.1 // indirect
+	golang.org/x/crypto v0.0.0-20211108221036-ceb1ce70b4fa // indirect
 	golang.org/x/net v0.0.0-20211209124913-491a49abca63 // indirect
 	golang.org/x/oauth2 v0.0.0-20211104180415-d3ed0bb246c8 // indirect
 	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c // indirect
