@@ -358,10 +358,10 @@ func (r *ImageRepositoryReconciler) scan(ctx context.Context, imageRepo *imagev1
 		}
 	} else if hostIsGoogleContainerRegistry(ref.Context().RegistryStr()) {
 		if r.GcpAutoLogin {
-			logr.FromContext(ctx).Info("Logging in to GCP GCR for " + imageRepo.Spec.Image)
+			ctrl.LoggerFrom(ctx).Info("Logging in to GCP GCR for " + imageRepo.Spec.Image)
 			authConfig, err := getGCRLoginAuth()
 			if err != nil {
-				logr.FromContext(ctx).Info("error logging into GCP " + err.Error())
+				ctrl.LoggerFrom(ctx).Info("error logging into GCP " + err.Error())
 				imagev1.SetImageRepositoryReadiness(
 					imageRepo,
 					metav1.ConditionFalse,
@@ -374,14 +374,14 @@ func (r *ImageRepositoryReconciler) scan(ctx context.Context, imageRepo *imagev1
 			auth := authn.FromConfig(authConfig)
 			options = append(options, remote.WithAuth(auth))
 		} else {
-			logr.FromContext(ctx).Info("No image credentials secret referenced, and GCR authentication is not enabled. To enable, set the controller flag --gcp-autologin-for-gcr")
+			ctrl.LoggerFrom(ctx).Info("No image credentials secret referenced, and GCR authentication is not enabled. To enable, set the controller flag --gcp-autologin-for-gcr")
 		}
 	} else if hostIsAzureContainerRegistry(ref.Context().RegistryStr()) {
 		if r.AzureAutoLogin {
-			logr.FromContext(ctx).Info("Logging in to Azure ACR for " + imageRepo.Spec.Image)
+			ctrl.LoggerFrom(ctx).Info("Logging in to Azure ACR for " + imageRepo.Spec.Image)
 			authConfig, err := getAzureLoginAuth(ref)
 			if err != nil {
-				logr.FromContext(ctx).Info("error logging into ACR " + err.Error())
+				ctrl.LoggerFrom(ctx).Info("error logging into ACR " + err.Error())
 				imagev1.SetImageRepositoryReadiness(
 					imageRepo,
 					metav1.ConditionFalse,
@@ -394,7 +394,7 @@ func (r *ImageRepositoryReconciler) scan(ctx context.Context, imageRepo *imagev1
 			auth := authn.FromConfig(authConfig)
 			options = append(options, remote.WithAuth(auth))
 		} else {
-			logr.FromContext(ctx).Info("No image credentials secret referenced, and ACR authentication is not enabled. To enable, set the controller flag --azure-autologin-for-acr")
+			ctrl.LoggerFrom(ctx).Info("No image credentials secret referenced, and ACR authentication is not enabled. To enable, set the controller flag --azure-autologin-for-acr")
 		}
 	}
 
