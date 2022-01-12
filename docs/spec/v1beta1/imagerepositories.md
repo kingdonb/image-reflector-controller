@@ -81,9 +81,9 @@ with the corresponding flag for each provider.
 
 For  [<abbr title="Elastic Kubernetes Service">EKS</abbr>][EKS] and [<abbr title="Elastic Container Registry">ECR</abbr>][ECR], 
 the flag is `--aws-autologin-for-ecr`.
-For [<abbr title="Googke Kubernetes Enginer">GKE</abbr>][GKE] and [<abbr title="Google Container Registry">GCR</abbr>][GCR],
+For [<abbr title="Google Kubernetes Engine">GKE</abbr>][GKE] and [<abbr title="Google Container Registry">GCR</abbr>][GCR],
 the flag is `--gcp-autologin-for-gcr`.
-For [<abbr title="Azure Kubernetes Service">AKS</abbr>][AKS] and [<abbr title="Azure Container Registry">EKS</abbr>][ACR],
+For [<abbr title="Azure Kubernetes Service">AKS</abbr>][AKS] and [<abbr title="Azure Container Registry">ACR</abbr>][ACR],
 the flag is  `--azure-autologin-for-acr`.
 
 #### Other platforms

@@ -67,10 +67,9 @@ import (
 // for consistency (and perhaps this will have its own flux create
 // secret subcommand at some point).
 const (
-	ClientCert               = "certFile"
-	ClientKey                = "keyFile"
-	CACert                   = "caFile"
-	azureCloudConfigJsonFile = "/etc/kubernetes/azure.json"
+	ClientCert = "certFile"
+	ClientKey  = "keyFile"
+	CACert     = "caFile"
 )
 
 // ImageRepositoryReconciler reconciles a ImageRepository object
@@ -102,13 +101,6 @@ type gceToken struct {
 	AccessToken string `json:"access_token"`
 	ExpiresIn   int    `json:"expires_in"`
 	TokenType   string `json:"token_type"`
-}
-
-type azureCloudConfig struct {
-	AADClientId            string `json:"aadClientId"`
-	AADClientSecret        string `json:"aadClientSecret"`
-	TenantID               string `json:"tenantId"`
-	UserAssignedIdentityID string `json:"userAssignedIdentityID"`
 }
 
 // +kubebuilder:rbac:groups=image.toolkit.fluxcd.io,resources=imagerepositories,verbs=get;list;watch;create;update;patch;delete
@@ -271,11 +263,11 @@ func getAwsECRLoginAuth(accountId, awsEcrRegion string) (authn.AuthConfig, error
 // the pod has right to pull the image which would be the case if it
 // is hosted on GCP. It works with both service account and workload identity
 // enabled clusters.
-func getGCRLoginAuth() (authn.AuthConfig, error) {
+func getGCRLoginAuth(ctx context.Context) (authn.AuthConfig, error) {
 	var authConfig authn.AuthConfig
 	const gcpDefaultTokenURL = "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token"
 
-	request, err := http.NewRequest(http.MethodGet, gcpDefaultTokenURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, gcpDefaultTokenURL, nil)
 	if err != nil {
 		return authConfig, err
 	}
@@ -359,7 +351,7 @@ func (r *ImageRepositoryReconciler) scan(ctx context.Context, imageRepo *imagev1
 	} else if hostIsGoogleContainerRegistry(ref.Context().RegistryStr()) {
 		if r.GcpAutoLogin {
 			ctrl.LoggerFrom(ctx).Info("Logging in to GCP GCR for " + imageRepo.Spec.Image)
-			authConfig, err := getGCRLoginAuth()
+			authConfig, err := getGCRLoginAuth(ctx)
 			if err != nil {
 				ctrl.LoggerFrom(ctx).Info("error logging into GCP " + err.Error())
 				imagev1.SetImageRepositoryReadiness(
@@ -379,7 +371,7 @@ func (r *ImageRepositoryReconciler) scan(ctx context.Context, imageRepo *imagev1
 	} else if hostIsAzureContainerRegistry(ref.Context().RegistryStr()) {
 		if r.AzureAutoLogin {
 			ctrl.LoggerFrom(ctx).Info("Logging in to Azure ACR for " + imageRepo.Spec.Image)
-			authConfig, err := getAzureLoginAuth(ref)
+			authConfig, err := getAzureLoginAuth(ctx, ref)
 			if err != nil {
 				ctrl.LoggerFrom(ctx).Info("error logging into ACR " + err.Error())
 				imagev1.SetImageRepositoryReadiness(
@@ -693,14 +685,14 @@ func getURLHost(urlStr string) (string, error) {
 
 // getAzureLoginAuth returns authentication for ACR. The details needed for authentication
 // are gotten from environment variable so there is not need to mount a host path.
-func getAzureLoginAuth(ref name.Reference) (authn.AuthConfig, error) {
+func getAzureLoginAuth(ctx context.Context, ref name.Reference) (authn.AuthConfig, error) {
 	var authConfig authn.AuthConfig
 
 	cred, err := azidentity.NewDefaultAzureCredential(nil)
 	if err != nil {
 		return authConfig, err
 	}
-	armToken, err := cred.GetToken(context.Background(), policy.TokenRequestOptions{
+	armToken, err := cred.GetToken(ctx, policy.TokenRequestOptions{
 		Scopes: []string{string(arm.AzurePublicCloud)},
 	})
 	if err != nil {
@@ -715,12 +707,13 @@ func getAzureLoginAuth(ref name.Reference) (authn.AuthConfig, error) {
 
 	return authn.AuthConfig{
 		// this is the acr username used by Azure
+		// See documentation: https://docs.microsoft.com/en-us/azure/container-registry/container-registry-authentication?tabs=azure-cli#az-acr-login-with---expose-token
 		Username: "00000000-0000-0000-0000-000000000000",
 		Password: accessToken,
 	}, nil
 }
 
-// List from https://github.com/kubernetes/kubernetes/blob/master/pkg/credentialprovider/azure/azure_credentials.go
+// List from https://github.com/kubernetes/kubernetes/blob/v1.23.1/pkg/credentialprovider/azure/azure_credentials.go#L55
 func hostIsAzureContainerRegistry(host string) bool {
 	for _, v := range []string{".azurecr.io", ".azurecr.cn", ".azurecr.de", ".azurecr.us"} {
 		if strings.HasSuffix(host, v) {
