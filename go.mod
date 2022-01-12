@@ -24,9 +24,8 @@ require (
 	sigs.k8s.io/controller-runtime v0.11.0
 )
 
-require github.com/Azure/azure-sdk-for-go/sdk/internal v0.8.1 // indirect
-
 require (
+	github.com/Azure/azure-sdk-for-go/sdk/internal v0.8.1 // indirect
 	cloud.google.com/go v0.97.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
