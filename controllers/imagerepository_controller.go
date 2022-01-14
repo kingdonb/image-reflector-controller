@@ -733,5 +733,5 @@ func hostIsAzureContainerRegistry(host string) bool {
 }
 
 func hostIsGoogleContainerRegistry(host string) bool {
-	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io")
+	return host == "gcr.io" || strings.HasSuffix(host, ".gcr.io") || strings.HasSuffix(host, "-docker.pkg.dev")
 }
